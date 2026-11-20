@@ -52,7 +52,7 @@ function assignTracks(tracks, faces, now) {
       used.add(best.id);
       next.push({ ...best, box: face.box, points: face.points, facePx: face.facePx, confidence: face.confidence, seen: now, live: true });
     } else {
-      next.push({ id: crypto.randomUUID(), box: face.box, points: face.points, facePx: face.facePx, confidence: face.confidence, seen: now, sentAt: 0, identity: null, live: true });
+      next.push({ id: crypto.randomUUID(), box: face.box, points: face.points, facePx: face.facePx, confidence: face.confidence, seen: now, born: now, sentAt: 0, identity: null, live: true });
     }
   }
   for (const track of tracks) {
@@ -189,6 +189,8 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
     let timer = 0;
     const faceNode = faceCanvas.current;
     let landmarker = null;
+    let serviceHold = 0;
+    let lastPoll = 0;
     let busy = false;
     let slow = 0;
     let overloadOn = false;
@@ -310,6 +312,7 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
             reason: weak ? "LOW_DETECTION_CONFIDENCE" : "",
             detectMs,
             alignMs: 0,
+            seenAt: track.born || now,
             warp: weak ? "" : await jpeg64(warpFace(faceNode, track.points)),
           });
         }
@@ -320,6 +323,18 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
           overloadOn = nextOverload;
           setOverload(nextOverload);
         }
+        if (now - serviceHold < 1500) {
+          if (now - lastPoll > 400) {
+            lastPoll = now;
+            const snapshot = await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" }).then((response) => response.ok ? response.json() : null);
+            for (const face of snapshot?.vision?.faces || []) {
+              const track = tracks.find((item) => item.id === face.trackId) || tracks.find((item) => overlapRatio(item.box, face.box) > 0.45);
+              if (track) track.identity = { name: face.name || "", outcome: face.outcome || "unknown", score: face.score ?? null };
+            }
+            show({ faces: labeled(), alert: snapshot?.vision?.alert });
+          }
+          return;
+        }
         if (!result.faces.length) return;
         const posted = await fetch("/api/gate/vision", {
           method: "POST",
@@ -328,6 +343,7 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
         });
         if (!posted.ok) return;
         const body = await posted.json();
+        if (body.leader === false) serviceHold = Date.now();
         const serverFaces = body.leader === false
           ? (await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" }).then((response) => response.ok ? response.json() : null))?.vision?.faces || []
           : body.vision?.faces || [];

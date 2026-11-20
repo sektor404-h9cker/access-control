@@ -224,6 +224,17 @@ if (!config.cameras.length) {
   process.exit(1);
 }
 log(`agent started for ${config.cameras.map((camera) => camera.id).join(", ")}`);
+const visionPid = path.join(root, "data", "gate-vision.pid");
+let visionAlive = false;
+try {
+  process.kill(Number(fs.readFileSync(visionPid, "utf8")), 0);
+  visionAlive = true;
+} catch { visionAlive = false; }
+if (!visionAlive) {
+  const vision = spawn(process.execPath, [path.join(root, "scripts", "gate-vision.js")], { stdio: "ignore" });
+  children.add(vision);
+  vision.once("exit", () => children.delete(vision));
+}
 const cpuMark = { sample: process.cpuUsage(), at: Date.now() };
 setInterval(() => {
   liveStats.cpu = cpuSince(cpuMark);

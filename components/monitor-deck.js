@@ -62,7 +62,7 @@ function cameraTone(report) {
   return "badge-muted";
 }
 
-export function MonitorDeck({ dict, cameras, canControl, canConfirm = false, owner, mode = "review", modelReady = false, templateCount = 0, alertSettings = null, passage = true }) {
+export function MonitorDeck({ dict, cameras, canControl, owner, mode = "review", modelReady = false, templateCount = 0, alertSettings = null, passage = true }) {
   const router = useRouter();
   const lock = useRef(false);
   const [pending, setPending] = useState("");
@@ -271,7 +271,8 @@ export function MonitorDeck({ dict, cameras, canControl, canConfirm = false, own
             ) : null}
             {gateBanner ? <p className="muted">{gateBanner}</p> : null}
             <p className="muted">{passage ? dict.monitoring.motionMode : dict.monitoring.stillMode}</p>
-            <p className="muted">{mode === "pilot" ? dict.monitoring.pilotMode : dict.monitoring.reviewMode}</p>
+            <p className="muted">{dict.monitoring.autoMode}</p>
+            <p className="muted">{dict.monitoring.presenceMode}</p>
             <p className="muted">{!alertSettings?.enabled ? dict.monitoring.soundSavedOff : muted ? dict.monitoring.soundOff : sound === "running" ? dict.monitoring.soundOn : sound === "blocked" || sound === "missing" ? dict.monitoring.alertBlocked : running ? dict.monitoring.soundPress : dict.monitoring.soundIdle}</p>
             {templateCount ? null : <p className="muted">{dict.monitoring.noFaces}</p>}
             <ul className="stack">
@@ -349,10 +350,10 @@ export function MonitorDeck({ dict, cameras, canControl, canConfirm = false, own
       </div>
       </div>
       <aside className="panel camera-log">
-        <div className="panel-hd"><h2>{dict.monitoring.faceSeen}</h2></div>
+        <div className="panel-hd"><h2>{dict.monitoring.liveRecognitions}</h2></div>
         <div className="panel-bd stack">
           <CameraLog cameraId={shown[0]?.id || ""} dict={dict} />
-          <PassageQueue dict={dict} canConfirm={canConfirm} />
+          <PassageQueue dict={dict} />
         </div>
       </aside>
       </div>

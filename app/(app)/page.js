@@ -3,6 +3,7 @@ import { Clock } from "@/components/clock";
 import { DashboardLive } from "@/components/dashboard-live";
 import { MonitorDeck } from "@/components/monitor-deck";
 import { LivePulse } from "@/components/live-pulse";
+import { LiveRefresh } from "@/components/live-refresh";
 import { Badge, Denied } from "@/components/ui";
 import { dashboardSnapshot } from "@/lib/dashboard";
 import { requireUser } from "@/lib/guard";
@@ -73,6 +74,7 @@ export default async function DashboardPage() {
   return (
     <>
       <LivePulse />
+      <LiveRefresh />
       <div className="clock-band">
         <div>
           <h1 style={{ margin: 0 }}>{dict.dashboard.title}</h1>

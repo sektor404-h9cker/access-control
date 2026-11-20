@@ -136,7 +136,7 @@ export async function submitRecognitionMode(_previous, formData) {
   const context = await actionContext("settings.manage");
   if (context.error) return { ok: false, error: context.error };
   if (context.user.role !== "owner") return { ok: false, error: "forbidden" };
-  const result = updateRecognitionMode(String(formData.get("mode") || "review"), context.meta, formData.get("pace") === "close" ? "close" : "motion");
+  const result = updateRecognitionMode(String(formData.get("mode") || "review"), context.meta, formData.get("pace") === "close" ? "close" : "motion", formData.get("auto") === "1");
   if (result.ok) refresh();
   return result;
 }

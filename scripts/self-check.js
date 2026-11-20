@@ -30,6 +30,8 @@ const { closeDb, getDb, get, all, run } = await import("../lib/db.js");
 const { addDays, bakuStamp, formatDateTime, todayKey } = await import("../lib/time.js");
 const { recordEnrollment } = await import("../lib/enrollment.js");
 const { identify, recognitionStatus, recognizeVector, confirmRecognition } = await import("../lib/recognition.js");
+const { observePassage } = await import("../lib/passage-track.js");
+const { notePresence } = await import("../lib/presence.js");
 const { decideMatch, cosine, livenessOf, matchReason } = await import("../lib/face-match.js");
 const { SFACE_DEST, estimateSimilarity, applySimilarity, pointMotion } = await import("../lib/face-geometry.js");
 const { embedJpeg } = await import("../lib/face-embed.js");
@@ -422,6 +424,35 @@ const repeated = recognizeVector(firstEmbed.vector, {
 });
 assert(repeated.duplicate === true, "The same face immediately created another event");
 assert(all("SELECT id FROM attendance WHERE employee_id = ?", [watched.id]).length === 1, "A repeated entrance opened another shift");
+{
+  const autoPerson = person("Avto", "T-206");
+  assert(autoPerson.ok, autoPerson.error || "Automatic employee failed");
+  run("UPDATE employees SET biometric_allowed = 1 WHERE id = ?", [autoPerson.id]);
+  const autoVector = new Float32Array(128);
+  autoVector[6] = 1;
+  assert(saveTemplateVector(autoPerson.id, autoVector, meta).ok, "Automatic template failed");
+  const face = { employeeId: autoPerson.id, outcome: "matched", score: 0.8, seenAt: Date.now() };
+  const t0 = Date.now();
+  const passages = () => all("SELECT id FROM passage_events WHERE employee_id = ? AND applied IN ('applied', 'return', 'repeat')", [autoPerson.id]).length;
+  assert(observePassage("camera-entrance", face, t0).waiting === true, "The first match recorded a passage");
+  const recorded = observePassage("camera-entrance", face, t0 + 800);
+  assert(recorded.saved === true, recorded.error || "Two matches did not record attendance");
+  assert(all("SELECT id FROM attendance WHERE employee_id = ?", [autoPerson.id]).length === 1, "Automatic entry did not open one shift");
+  observePassage("camera-entrance", face, t0 + 2000);
+  assert(passages() === 1, "Standing in front of the camera created another passage");
+  globalThis.__smzPassageTracks.clear();
+  observePassage("camera-entrance", face, t0 + 3000);
+  observePassage("camera-entrance", face, t0 + 3800);
+  assert(passages() === 1, "A restart wrote the same stay again");
+  notePresence("camera-entrance", [], 0, t0 + 4000);
+  notePresence("camera-entrance", [], 0, t0 + 8000);
+  globalThis.__smzPassageTracks.clear();
+  observePassage("camera-entrance", face, t0 + 9000);
+  const returnedPass = observePassage("camera-entrance", face, t0 + 9800);
+  assert(returnedPass.saved === true, returnedPass.error || "A real return after leaving was blocked");
+  assert(passages() === 2, "The return did not create a new event");
+  assert(all("SELECT id FROM attendance WHERE employee_id = ?", [autoPerson.id]).length === 1, "The return opened a second shift");
+}
 const stranger = new Float32Array(128);
 stranger[127] = 1;
 const unknownHit = recognizeVector(stranger, {
@@ -599,6 +630,7 @@ const gateFrame = fs.readFileSync(path.join(process.cwd(), "app/api/gate/frame/r
 const gateAgent = fs.readFileSync(path.join(process.cwd(), "scripts/gate-agent.js"), "utf8");
 assert(gateAction.includes('role !== "owner"'), "A non-owner can stop the gate");
 assert(!gateFrame.includes("recognizeJpeg") && !gateAgent.includes("recognizeJpeg") && !gateAgent.includes("getDb"), "The gate relay recognized a face or opened SQLite");
+assert(gateAgent.includes("gate-vision.js"), "The gate agent does not keep recognition running without the page");
 assert(isTensorFlowInfo(TENSORFLOW_INFO) && !isTensorFlowInfo("Error: camera failed") && !isTensorFlowInfo("INFO: something else"), "The TensorFlow filter hid a real error");
 const wasmLog = fs.readFileSync(path.join(process.cwd(), "public/vendor/mediapipe/wasm/vision_wasm_internal.js"), "utf8");
 const gateStage = fs.readFileSync(path.join(process.cwd(), "components/gate-stage.js"), "utf8");

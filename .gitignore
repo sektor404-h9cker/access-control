@@ -41,6 +41,7 @@ yarn-error.log*
 /data/gate.token
 /data/gate-agent.json
 /data/gate-agent.log
+/data/gate-vision.pid
 /data/certs/
 /data/photos/*
 !/data/photos/.gitkeep

@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { LivePulse } from "@/components/live-pulse";
+import { LiveRefresh } from "@/components/live-refresh";
 import { MonitorDeck } from "@/components/monitor-deck";
 import { HelpDesk } from "@/components/help-desk";
 import { OperatorAlert } from "@/components/operator-alert";
@@ -42,6 +43,7 @@ export default async function MonitoringPage() {
   return (
     <>
       <LivePulse />
+      <LiveRefresh />
       <PageHeader title={dict.monitoring.title} subtitle={dict.monitoring.subtitle} />
       <MonitorDeck
         dict={dict}

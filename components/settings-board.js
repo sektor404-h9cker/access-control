@@ -173,6 +173,7 @@ function RecognitionForm({ dict, settings }) {
       <label className="check"><input type="radio" name="mode" value="pilot" defaultChecked={settings.recognitionMode === "pilot"} /> <span>{dict.settings.modePilot}</span></label>
       <label className="check"><input type="radio" name="pace" value="motion" defaultChecked={settings.recognitionPace !== "close"} /> <span>{dict.monitoring.motionMode}</span></label>
       <label className="check"><input type="radio" name="pace" value="close" defaultChecked={settings.recognitionPace === "close"} /> <span>{dict.monitoring.stillMode}</span></label>
+      <label className="check"><input type="checkbox" name="auto" value="1" defaultChecked={settings.autoAttendance !== false} /> <span>{dict.settings.autoAttendance}</span></label>
       <p className="muted">{dict.monitoring.motionHint}</p>
       <button className="btn btn-primary" type="submit" disabled={pending}>{pending ? dict.common.loading : dict.common.save}</button>
     </form>

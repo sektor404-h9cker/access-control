@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readToken } from "./lib/token.js";
 
-const PUBLIC_PATHS = new Set(["/login", "/setup"]);
+const PUBLIC_PATHS = new Set(["/login", "/setup", "/service/vision"]);
 
 export function proxy(request) {
   const { pathname } = request.nextUrl;
