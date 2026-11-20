@@ -40,7 +40,7 @@ function PolicyForm({ dict, employeeId, policy, today }) {
   );
 }
 
-export function EmployeeDetail({ dict, locale, employee, departments, schedule, history, sessions, canUpdate, canEnroll, canDelete, canPolicy, policy, today, sensitive }) {
+export function EmployeeDetail({ dict, locale, employee, departments, schedule, history, sessions, canUpdate, canEnroll, canDelete, canPolicy, policy, attendance, today, sensitive }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -114,6 +114,68 @@ export function EmployeeDetail({ dict, locale, employee, departments, schedule, 
         {sensitive && employee.faceCurrent ? <p className="muted profile-note">{dict.face.statusNote}</p> : null}
         {sensitive && !employee.biometricAllowed ? <p className="muted profile-note">{dict.face.needConsent}</p> : null}
       </section>
+      {attendance ? (
+        <section className="panel">
+          <div className="panel-hd"><h2>{dict.employees.attendanceTitle}</h2></div>
+          {attendance.days.length === 0 && attendance.passages.length === 0 ? <p className="empty">{dict.employees.attendanceEmpty}</p> : (
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>{dict.reports.colDate}</th>
+                    <th>{dict.attendance.checkIn}</th>
+                    <th>{dict.attendance.checkOut}</th>
+                    <th>{dict.common.status}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attendance.days.map((day) => (
+                    <tr key={day.id}>
+                      <td className="num">{day.workDate}</td>
+                      <td className="num">{day.checkIn ? formatDateTime(day.checkIn, locale) : "—"}</td>
+                      <td className="num">{day.checkOut ? formatDateTime(day.checkOut, locale) : day.exitMissing ? dict.reports.exitMissing : "—"}</td>
+                      <td>{day.source || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {attendance.passages.length ? (
+            <div className="table-wrap">
+              <table className="data">
+                <thead><tr><th>{dict.common.time}</th><th>{dict.attendance.directionIn}</th><th>{dict.dashboard.cameras}</th><th>{dict.attendance.source}</th></tr></thead>
+                <tbody>
+                  {attendance.passages.map((item) => (
+                    <tr key={item.id}>
+                      <td className="num">{formatDateTime(item.at, locale)}</td>
+                      <td>{item.direction === "out" ? dict.attendance.directionOut : dict.attendance.directionIn}</td>
+                      <td>{item.cameraCode || "—"}</td>
+                      <td>{item.source || item.applied}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {attendance.revisions.length ? (
+            <div className="table-wrap">
+              <table className="data">
+                <thead><tr><th>{dict.common.time}</th><th>{dict.common.username}</th><th>{dict.employees.attendanceCorrection}</th></tr></thead>
+                <tbody>
+                  {attendance.revisions.map((item) => (
+                    <tr key={item.id}>
+                      <td className="num">{formatDateTime(item.at, locale)}</td>
+                      <td>{item.editor || "—"}</td>
+                      <td>{item.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {canPolicy ? (
         <section className="panel">
           <div className="panel-hd"><h2>{dict.employees.leadership}</h2></div>

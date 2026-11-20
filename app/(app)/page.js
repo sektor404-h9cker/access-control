@@ -67,6 +67,7 @@ export default async function DashboardPage() {
   const cards = [
     ["total", data.counts.total, dict.dashboard.totalEmployees, dict.dashboard.totalHint, "tone-accent"],
     ["onSite", data.counts.onSite, dict.dashboard.onSite, dict.dashboard.onSiteHint, "tone-ok"],
+    ["exitUnconfirmed", data.counts.exitUnconfirmed, dict.dashboard.exitUnconfirmed, dict.dashboard.exitUnconfirmedHint, "tone-warn"],
     ["absent", data.counts.absent, dict.dashboard.absent, dict.dashboard.absentHint, "tone-muted"],
     ["late", data.counts.late, dict.dashboard.late, dict.dashboard.lateHint, "tone-warn"],
     ["left", data.counts.left, dict.dashboard.left, dict.dashboard.leftHint, "tone-info"],

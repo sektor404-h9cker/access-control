@@ -12,8 +12,9 @@ import { can } from "@/lib/permissions";
 import { resolveSchedule } from "@/lib/schedule";
 import { getLocale } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { todayKey } from "@/lib/time";
+import { addDays, todayKey } from "@/lib/time";
 import { policyFor } from "@/lib/work-policy";
+import { listEmployeeAttendance } from "@/lib/passages";
 
 export const instant = false;
 
@@ -42,6 +43,7 @@ export default async function EmployeeDetailPage({ params }) {
       canDelete={can(user, "employees.archive")}
       canPolicy={can(user, "employees.policy")}
       policy={policyFor(id, today)}
+      attendance={can(user, "attendance.view") ? listEmployeeAttendance(id, addDays(today, -30), today) : null}
       today={today}
       sensitive={sensitive}
     />

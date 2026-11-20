@@ -102,6 +102,7 @@ export default async function ReportsPage({ searchParams }) {
               [dict.reports.summaryAbsent, report.summary.absent],
               [dict.reports.summaryLate, report.summary.late],
               [dict.reports.summaryEarly, report.summary.early],
+              [dict.reports.summaryIncomplete, report.summary.incomplete],
             ].map(([label, value]) => (
               <article key={label} className="stat"><span>{label}</span><b>{value}</b></article>
             ))}
@@ -123,6 +124,76 @@ export default async function ReportsPage({ searchParams }) {
               </div>
             )}
             <div className="panel-bd"><p className="muted">{dict.reports.weekendNote}</p></div>
+          </section>
+          <section className="panel">
+            <div className="panel-hd"><h2>{dict.reports.monthlyTitle}</h2></div>
+            {report.monthly.length === 0 ? <Empty title={dict.reports.empty} /> : (
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>{dict.reports.colEmployee}</th>
+                      <th>{dict.reports.colDepartment}</th>
+                      <th>{dict.reports.plannedDays}</th>
+                      <th>{dict.reports.presentDays}</th>
+                      <th>{dict.reports.summaryAbsent}</th>
+                      <th>{dict.reports.summaryLate}</th>
+                      <th>{dict.reports.confirmedMinutes}</th>
+                      <th>{dict.reports.incompleteDays}</th>
+                      <th>{dict.reports.passages}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.monthly.map((row) => (
+                      <tr key={row.employeeId}>
+                        <td>{row.employee}</td>
+                        <td>{row.department}</td>
+                        <td className="num">{row.planned}</td>
+                        <td className="num">{row.present}</td>
+                        <td className="num">{row.absent}</td>
+                        <td className="num">{row.late}</td>
+                        <td className="num">{row.confirmedMinutes}</td>
+                        <td className="num">{row.incomplete}</td>
+                        <td className="num">{row.passages}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+          <section className="panel">
+            <div className="panel-hd"><h2>{dict.reports.departmentTitle}</h2></div>
+            {report.departments.length === 0 ? <Empty title={dict.reports.empty} /> : (
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>{dict.reports.colDepartment}</th>
+                      <th>{dict.reports.summaryEmployees}</th>
+                      <th>{dict.reports.presentDays}</th>
+                      <th>{dict.reports.summaryAbsent}</th>
+                      <th>{dict.reports.summaryLate}</th>
+                      <th>{dict.reports.incompleteDays}</th>
+                      <th>{dict.reports.confirmedMinutes}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.departments.map((row) => (
+                      <tr key={row.department}>
+                        <td>{row.department}</td>
+                        <td className="num">{row.employees}</td>
+                        <td className="num">{row.present}</td>
+                        <td className="num">{row.absent}</td>
+                        <td className="num">{row.late}</td>
+                        <td className="num">{row.incomplete}</td>
+                        <td className="num">{row.confirmedMinutes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         </>
       ) : null}

@@ -153,7 +153,7 @@ assert(!duplicateMovement.ok && duplicateMovement.error === "already_checked_in"
 const board = dailyBoard(today);
 assert(board.length === 1 && board[0].lateMinutes === 12 && board[0].status === "late", "Daily board is wrong");
 const snapshot = dashboardSnapshot();
-assert(snapshot.counts.total === 1 && snapshot.counts.late === 1 && snapshot.counts.onSite === 1, "Dashboard counts are wrong");
+assert(snapshot.counts.total === 1 && snapshot.counts.late === 1 && snapshot.counts.onSite === 0 && snapshot.counts.exitUnconfirmed === 1, "Dashboard counts are wrong");
 const adminGrants = all("SELECT permission FROM role_permissions WHERE role_key = 'admin'").map((row) => row.permission);
 assert(!adminGrants.includes("employees.policy") && !can({ role: "admin", permissions: adminGrants }, "employees.policy"), "Leadership rights were granted without the owner");
 const lead = saveEmployee({
@@ -217,7 +217,9 @@ const report = presentReport(buildReport({
   dict,
   periodLabel: "period",
 }), dict, "ru");
-assert(report.rows.some((row) => row.employee.includes("Hüseynov") && row.status === dict.attendance.statusLate), "Report row missing");
+assert(report.rows.some((row) => row.employee.includes("Hüseynov") && row.status === dict.attendance.statusLate && row.checkOut === dict.reports.exitMissing && row.duration !== "7 ч" && !row.durationMinutes), "Report row missing");
+assert(report.summary.incomplete >= 1 && report.monthly.some((row) => row.employee.includes("Hüseynov") && row.incomplete === 1), "Monthly summary missed the open exit");
+assert(report.departments.some((row) => row.incomplete >= 1), "Department summary missed the open exit");
 assert(report.rows.some((row) => row.status === dict.attendance.statusFlex), "Free schedule was missing from the report");
 const pdf = await buildPdf(report, "ru");
 assert(pdf.subarray(0, 4).toString() === "%PDF", "PDF was not created");
@@ -225,7 +227,9 @@ const xlsx = buildXlsx(report);
 const xlsxFile = path.join(directory, "report.xlsx");
 fs.writeFileSync(xlsxFile, xlsx);
 const sheet = execFileSync("unzip", ["-p", xlsxFile, "xl/worksheets/sheet1.xml"], { encoding: "utf8" });
-assert(sheet.includes("Hüseynov"), "Excel file is missing the employee");
+assert(sheet.includes("Hüseynov") && sheet.includes("autoFilter") && sheet.includes("frozen"), "Excel file is missing the employee");
+const summarySheet = execFileSync("unzip", ["-p", xlsxFile, "xl/worksheets/sheet2.xml"], { encoding: "utf8" });
+assert(summarySheet.includes("Hüseynov"), "Excel summary is missing the employee");
 
 const passwordHash = await hashPassword("Parol12345");
 assert(await verifyPassword("Parol12345", passwordHash), "Password verification failed");
@@ -279,6 +283,8 @@ const corrected = updateAttendance({
 assert(corrected.ok, corrected.error || "Attendance correction failed");
 const revision = get("SELECT reason, before_json FROM attendance_revisions WHERE attendance_id = ? AND reason = ?", [board[0].recordId, "clock was wrong"]);
 assert(revision.reason === "clock was wrong" && revision.before_json.includes("08:27"), "Original attendance value was not kept");
+const correctedReport = buildReport({ from: today, to: today, employeeId: employee.id, dict, periodLabel: "fixed" });
+assert(correctedReport.rows[0].checkIn === "08:20" && correctedReport.rows[0].checkOut === dict.reports.exitMissing, "The report kept the old entry after a correction");
 const automatic = saveEmployee({
   lastName: "Avtomatik",
   firstName: "Nömrə",
