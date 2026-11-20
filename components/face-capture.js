@@ -5,6 +5,7 @@ import { cameraErrorCode } from "./camera-devices";
 import { listSharedDevices } from "./camera-hub";
 import { holdCamera } from "./camera-hub";
 import { poseMatches } from "@/lib/face-geometry";
+import { pauseGateForEnrollment, resumeGateAfterEnrollment } from "@/app/actions/gate";
 import { ENROLL_STEPS, HINT, assess, createLandmarker, detectFaces, hashDistance, imageHash, qualityLabel, viewBox, warpFace } from "./face-vision";
 
 export function FaceCapture({ dict, onClose, onConfirm, busy, serverError = "", replace = false, onPreview }) {
@@ -50,28 +51,38 @@ export function FaceCapture({ dict, onClose, onConfirm, busy, serverError = "", 
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/gate/status", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((status) => {
-        if (cancelled) return;
-        if (status?.agentUp && status?.desired !== "stopped") {
+    const held = { paused: false };
+    async function releaseAndList() {
+      const response = await fetch("/api/gate/status", { cache: "no-store" });
+      const status = response.ok ? await response.json() : null;
+      if (cancelled) return;
+      if (status?.agentUp && status?.desired !== "stopped") {
+        const paused = await pauseGateForEnrollment();
+        if (cancelled) {
+          if (paused?.ok) resumeGateAfterEnrollment();
+          return;
+        }
+        if (!paused?.ok) {
           blockedRef.current = true;
           setError("cameraHeld");
           return;
         }
-        return listSharedDevices();
-      })
-      .then((found) => {
-        if (cancelled || !found) return;
-        setDevices(found);
-        setDeviceId((current) => current || found[0]?.deviceId || "");
-        if (!found.length) setError("noCamera");
-      })
-      .catch((reason) => {
-        if (!cancelled) setError(cameraErrorCode(reason));
-      });
+        held.paused = true;
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+      if (cancelled) return;
+      const found = await listSharedDevices();
+      if (cancelled || !found) return;
+      setDevices(found);
+      setDeviceId((current) => current || found[0]?.deviceId || "");
+      if (!found.length) setError("noCamera");
+    }
+    releaseAndList().catch((reason) => {
+      if (!cancelled) setError(cameraErrorCode(reason));
+    });
     return () => {
       cancelled = true;
+      if (held.paused) resumeGateAfterEnrollment();
     };
   }, []);
 

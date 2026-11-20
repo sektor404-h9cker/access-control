@@ -274,7 +274,7 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
           result.timing.totalMs = Math.round(performance.now() - wall);
           const faces = assessAll(detected, faceNode, true).filter((face) => face.box);
           if (faces.length) show({ faces: faces.map((face) => ({ box: face.box })) }, true);
-          const usable = faces.filter((face) => face.aligned && face.quality !== "poor" && face.facePx >= 96);
+          const usable = faces.filter((face) => face.aligned && face.facePx >= 48);
           for (const face of faces.slice(0, 2)) {
             let warp = "";
             if (usable.includes(face)) warp = await jpeg64(warpFace(faceNode, face.aligned));
