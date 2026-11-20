@@ -34,13 +34,19 @@ export const HINT = {
   done: "hintDone",
 };
 
+export const FACE_LIMIT = 4;
+
+// У face_landmarker.task поле presence у точки равно 0, когда модель его не заполняет.
+// Ноль не является ни отказом, ни отдельной оценкой детектора.
 function detectionConfidence(landmarks) {
   const indexes = [1, 33, 263, 61, 291];
   let sum = 0;
   let count = 0;
   for (const index of indexes) {
-    const value = Number(landmarks?.[index]?.presence ?? landmarks?.[index]?.visibility);
-    if (!Number.isFinite(value)) continue;
+    const point = landmarks?.[index];
+    const raw = point?.presence ?? point?.visibility;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) continue;
     sum += value;
     count += 1;
   }
@@ -162,7 +168,7 @@ export function assess(result, canvas) {
 export function assessAll(result, canvas, passage = false) {
   const faces = result?.faceLandmarks || [];
   if (!faces.length) return [{ code: "no_face", quality: "poor", box: null, points: [], aligned: null, facePx: 0 }];
-  return faces.slice(0, 2).map((landmarks) => scoreFace(landmarks, canvas, passage));
+  return faces.slice(0, FACE_LIMIT).map((landmarks) => scoreFace(landmarks, canvas, passage));
 }
 
 function alignmentPoints(landmarks) {
@@ -296,7 +302,7 @@ function withoutDetectorNoise(method) {
   };
 }
 
-export function detectFaces(landmarker, canvas, now) {
+export function detectFaces(landmarker, canvas) {
   const error = console.error;
   const warn = console.warn;
   const log = console.log;
@@ -304,7 +310,7 @@ export function detectFaces(landmarker, canvas, now) {
   console.warn = withoutDetectorNoise(warn);
   console.log = withoutDetectorNoise(log);
   try {
-    return landmarker.detectForVideo(canvas, now);
+    return landmarker.detect(canvas);
   } finally {
     console.error = error;
     console.warn = warn;
@@ -324,12 +330,11 @@ export async function createLandmarker() {
     const files = await vision.FilesetResolver.forVisionTasks("/vendor/mediapipe/wasm");
     return await vision.FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: "/vendor/mediapipe/face_landmarker.task", delegate: "CPU" },
-      runningMode: "VIDEO",
-      numFaces: 3,
+      runningMode: "IMAGE",
+      numFaces: FACE_LIMIT,
       outputFaceBlendshapes: false,
       minFaceDetectionConfidence: 0.3,
       minFacePresenceConfidence: 0.3,
-      minTrackingConfidence: 0.3,
     });
   } finally {
     console.error = error;

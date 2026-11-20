@@ -587,6 +587,8 @@ assert(ffmpegArgs({ platform: "win32", device: "USB Camera" }).includes("video=U
   const back2 = stepVisit(back.track, seen, 20100);
   assert(back2.action === "offer" && back2.reentry === true, "A return after leaving was merged into the old visit");
   const back3 = stepVisit(back2.track, seen, 20200);
+  const silent = stepVisit(again.track, seen, 2000 + 4000);
+  assert(silent.action === "wait" && silent.track.offered === false, "A return after a long silence continued the old visit");
   const other = stepVisit(back3.track, { employeeId: "person-b", outcome: "matched" }, 20300);
   assert(other.action === "hold" && other.track.employeeId === "person-a", "A different person was merged into the open visit");
   assert(stepVisit(null, { employeeId: "person-a", outcome: "ambiguous" }, 1).action === "wait", "An ambiguous face opened a visit");
@@ -610,7 +612,8 @@ const enrollment = fs.readFileSync(path.join(process.cwd(), "components/face-cap
 const localPreview = fs.readFileSync(path.join(process.cwd(), "components/camera-preview.js"), "utf8");
 assert(analysisFrame.includes("ctx.scale(-1, 1)") && analysisFrame.includes("export function drawAnalysisFrame"), "Enrollment and the gate no longer share one mirrored preparation");
 assert(gateStage.includes("drawAnalysisFrame") && gateStage.includes("unmirrorBox") && enrollment.includes("drawAnalysisFrame") && localPreview.includes("drawAnalysisFrame"), "A camera path prepares the face differently from enrollment");
-assert(gateStage.includes("face.confidence > 0 && face.confidence < 0.3"), "A missing detector score discarded the aligned face before SFace");
+assert(analysisFrame.includes('runningMode: "IMAGE"') && analysisFrame.includes("numFaces: FACE_LIMIT") && analysisFrame.includes("value <= 0"), "Face detection still depended on an unset presence score or a single face");
+assert(gateStage.includes("frameToken") && gateStage.includes("sentAt") && !gateStage.includes(".slice(0, 2)"), "The gate recognized the same frame again or ignored a second face");
 assert(gateStage.includes('face.outcome === "preliminary"'), "The first match name was removed from the live picture");
 assert(matchReason({ embedded: false }) === "EMBEDDING_FAILED", "A failed embedding was compared");
 assert(matchReason({ templateCount: 0, decryptFailed: 2 }) === "TEMPLATE_DECRYPTION_FAILED", "A broken template was treated as an empty gallery");

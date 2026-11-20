@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { get } from "@/lib/db";
 import { claimVision, noteVision } from "@/lib/gate-store";
 import { can } from "@/lib/permissions";
-import { observePassage } from "@/lib/passage-track";
+import { observePassage, observeUnknown } from "@/lib/passage-track";
 import { ACCEPT_COSINE } from "@/lib/face-match";
 import { identifyProbe } from "@/lib/recognition";
 import { getCurrentUser } from "@/lib/session";
@@ -23,8 +23,8 @@ export async function POST(request) {
   const incoming = body.result || {};
   const faces = [];
   const traces = [];
-  let proposal = null;
-  for (const face of (Array.isArray(incoming.faces) ? incoming.faces : []).slice(0, 2)) {
+  const proposals = [];
+  for (const face of (Array.isArray(incoming.faces) ? incoming.faces : []).slice(0, 4)) {
     let identity = { name: "", outcome: "unchecked", score: null, secondScore: null, enrolled: false, reason: face?.reason || "NO_FACE", embedMs: 0, matchMs: 0, templateCount: 0, decryptFailed: 0 };
     const warp = String(face?.warp || "");
     if (warp && face?.aligned) {
@@ -33,17 +33,19 @@ export async function POST(request) {
         const probe = await identifyProbe(bytes);
         if (probe.ok) {
           identity = probe;
-          if (!proposal && probe.outcome === "matched" && probe.employeeId) proposal = probe;
+          if (probe.outcome === "matched" && probe.employeeId && !proposals.some((item) => item.employeeId === probe.employeeId)) proposals.push({ ...probe, trackId: face.trackId });
         } else identity = { ...identity, outcome: probe.error || "failed", reason: "EMBEDDING_FAILED" };
       } else identity = { ...identity, reason: "EMBEDDING_FAILED" };
     } else if (face?.reason === "LOW_DETECTION_CONFIDENCE") identity = { ...identity, reason: "LOW_DETECTION_CONFIDENCE" };
     else if (face?.box && !face?.aligned) identity = { ...identity, reason: "ALIGNMENT_FAILED" };
     faces.push({
       box: face?.box || null,
+      trackId: String(face?.trackId || ""),
       name: identity.outcome === "matched" ? identity.name || "" : "",
       outcome: identity.outcome === "matched" ? "preliminary" : identity.outcome || "unchecked",
       score: identity.score ?? null,
       enrolled: identity.enrolled === true,
+      employeeId: identity.outcome === "matched" ? identity.employeeId || "" : "",
     });
     traces.push({
       detected: Boolean(face?.box),
@@ -85,35 +87,39 @@ export async function POST(request) {
     });
   }
   let alert = null;
-  let card = null;
+  const cards = [];
   const side = camera.direction === "exit" ? "exit" : "entrance";
-  if (proposal) {
+  for (const proposal of proposals) {
     const passage = observePassage(cameraId, { ...proposal, direction: side });
-    if (passage?.alert?.id && passage.alert.sound) alert = passage.alert;
-    if (passage?.id) {
-      for (const face of faces) {
-        if (face.outcome === "preliminary") face.outcome = "matched";
-      }
-      for (const trace of traces) {
-        if (trace.reason === "MATCH_CONFIRMED") trace.stable = true;
-      }
-      const employee = get(
-        "SELECT e.position AS position, d.name AS department FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?",
-        [passage.employeeId],
-      );
-      card = {
-        id: passage.id,
-        name: passage.name || proposal.name || "",
-        department: employee?.department || "",
-        position: employee?.position || "",
-        cameraCode: passage.cameraCode || "",
-        direction: passage.direction || (camera.direction === "exit" ? "out" : "in"),
-        outcome: passage.outcome || proposal.outcome,
-        at: passage.at,
-      };
+    if (!alert && passage?.alert?.id && passage.alert.sound) alert = passage.alert;
+    if (!passage?.id) continue;
+    for (const face of faces) {
+      if (face.employeeId === proposal.employeeId) face.outcome = "matched";
     }
+    for (const trace of traces) {
+      if (trace.reason === "MATCH_CONFIRMED") trace.stable = true;
+    }
+    const employee = get(
+      "SELECT e.position AS position, d.name AS department FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?",
+      [passage.employeeId],
+    );
+    cards.push({
+      id: passage.id,
+      name: passage.name || proposal.name || "",
+      department: employee?.department || "",
+      position: employee?.position || "",
+      cameraCode: passage.cameraCode || "",
+      direction: passage.direction || (camera.direction === "exit" ? "out" : "in"),
+      outcome: passage.outcome || proposal.outcome,
+      at: passage.at,
+    });
   }
-  for (const trace of traces) trace.published = Boolean(card) && trace.reason === "MATCH_CONFIRMED";
+  for (const face of faces) {
+    if (face.outcome !== "unknown" || !face.trackId) continue;
+    const signal = observeUnknown(cameraId, face.trackId, side);
+    if (!alert && signal?.id && signal.sound) alert = signal;
+  }
+  for (const trace of traces) trace.published = cards.length > 0 && trace.reason === "MATCH_CONFIRMED";
   const vision = noteVision(cameraId, { ...incoming, faces, alert });
-  return Response.json({ ok: true, leader: true, vision, alert, card, traces }, { headers: { "cache-control": "no-store" } });
+  return Response.json({ ok: true, leader: true, vision, alert, card: cards[0] || null, cards, traces }, { headers: { "cache-control": "no-store" } });
 }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { submitPerformanceProfile } from "@/app/actions/vision";
 import { primeAudio } from "./audio-session";
-import { assessAll, createLandmarker, detectFaces, drawAnalysisFrame, unmirrorBox, warpFace } from "./face-vision";
+import { FACE_LIMIT, assessAll, createLandmarker, detectFaces, drawAnalysisFrame, unmirrorBox, warpFace } from "./face-vision";
 
 const LAYERS_KEY = "smz-ai-layers";
 
@@ -16,13 +16,50 @@ function readLayers() {
   }
 }
 
-function overlaps(left, right) {
-  if (!left || !right) return false;
+function overlapRatio(left, right) {
+  if (!left || !right) return 0;
   const width = Math.max(0, Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x));
   const height = Math.max(0, Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y));
   const shared = width * height;
   const smaller = Math.min(left.w * left.h, right.w * right.h);
-  return smaller > 0 && shared / smaller > 0.45;
+  return smaller > 0 ? shared / smaller : 0;
+}
+
+function frameToken(source, probe) {
+  const ctx = probe.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, 8, 8);
+  const data = ctx.getImageData(0, 0, 8, 8).data;
+  let hash = 2166136261;
+  for (let index = 0; index < data.length; index += 4) hash = Math.imul(hash ^ data[index], 16777619);
+  return hash >>> 0;
+}
+
+function assignTracks(tracks, faces, now) {
+  const used = new Set();
+  const next = [];
+  for (const face of faces) {
+    let best = null;
+    let bestScore = 0.25;
+    for (const track of tracks) {
+      if (used.has(track.id) || !track.box) continue;
+      const score = overlapRatio(track.box, face.box);
+      if (score > bestScore) {
+        best = track;
+        bestScore = score;
+      }
+    }
+    if (best) {
+      used.add(best.id);
+      next.push({ ...best, box: face.box, points: face.points, facePx: face.facePx, confidence: face.confidence, seen: now, live: true });
+    } else {
+      next.push({ id: crypto.randomUUID(), box: face.box, points: face.points, facePx: face.facePx, confidence: face.confidence, seen: now, sentAt: 0, identity: null, live: true });
+    }
+  }
+  for (const track of tracks) {
+    if (used.has(track.id)) continue;
+    if (now - track.seen < 1200) next.push({ ...track, live: false });
+  }
+  return next;
 }
 
 function project(box, viewW, viewH, frameW, frameH) {
@@ -104,6 +141,7 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
   const [stats, setStats] = useState(null);
   const [overload, setOverload] = useState(false);
   const [chip, setChip] = useState("");
+  const [unknownCount, setUnknownCount] = useState(0);
 
   useEffect(() => {
     dictRef.current = dict;
@@ -155,7 +193,6 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
     let slow = 0;
     let overloadOn = false;
     let shownName = "";
-    let misses = 0;
     let lastAlert = "";
     let settingsStamp = 0;
     let sawFrame = false;
@@ -166,157 +203,159 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
       window.dispatchEvent(new CustomEvent("smz-signal", { detail: alert }));
       primeAudio({ open: true });
     };
-    const show = (vision, local = false) => {
-      const previous = (visionRef.current?.faces || []).filter((face) => (face.outcome === "matched" || face.outcome === "preliminary") && face.name && face.box);
-      const incoming = vision?.faces || [];
-      const faces = local
-        ? incoming.map((face) => {
-          const known = previous.find((item) => overlaps(item.box, face.box)) || (previous.length === 1 && incoming.length === 1 ? previous[0] : null);
-          return known ? { ...face, name: known.name, outcome: known.outcome, score: known.score } : { ...face, name: "", outcome: "unchecked" };
-        })
-        : incoming;
-      const next = { ...vision, faces };
-      visionRef.current = next;
+    const probe = document.createElement("canvas");
+    probe.width = 8;
+    probe.height = 8;
+    let tracks = [];
+    let lastToken = 0;
+    const labeled = () => tracks.filter((track) => track.live && track.box).map((track) => ({
+      box: track.box,
+      trackId: track.id,
+      name: track.identity?.name || "",
+      outcome: track.identity?.outcome || "detected",
+      score: track.identity?.score ?? null,
+    }));
+    const show = (vision) => {
+      const faces = vision?.faces || [];
+      visionRef.current = { ...vision, faces };
       const frame = image.current;
       const rendered = Boolean(overlay.current && frame?.naturalWidth);
-      if (rendered) drawOverlay(overlay.current, frame.naturalWidth, frame.naturalHeight, next, layersRef.current, dictRef.current);
+      if (rendered) drawOverlay(overlay.current, frame.naturalWidth, frame.naturalHeight, visionRef.current, layersRef.current, dictRef.current);
       const nextName = faces.find((face) => (face.outcome === "matched" || face.outcome === "preliminary") && face.name)?.name || "";
-      if (nextName) {
-        if (nextName !== shownName) {
-          shownName = nextName;
-          setChip(nextName);
-        }
-      } else if (!local || !incoming.length) {
-        shownName = "";
-        setChip("");
+      if (nextName !== shownName) {
+        shownName = nextName;
+        setChip(nextName);
       }
-      if (!local) hear(vision?.alert);
+      setUnknownCount(faces.filter((face) => face.outcome === "unknown").length);
       return { rendered, name: nextName };
     };
     async function tick() {
       if (stop) return;
       if (busy) {
-        timer = window.setTimeout(tick, 200);
+        timer = window.setTimeout(tick, 80);
         return;
       }
+      const source = image.current;
+      const now = Date.now();
+      if (!aiRef.current || now - settingsStamp > 4000) {
+        settingsStamp = now;
+        fetch("/api/gate/status", { cache: "no-store" }).then(async (status) => {
+          const payload = status.ok ? await status.json() : null;
+          if (payload?.ai) aiRef.current = payload.ai;
+          if (layersRef.current.stats && payload) {
+            const camera = payload.cameras?.find((item) => item.id === cameraId);
+            const metrics = payload.metrics || {};
+            setStats({
+              captureFps: Number(metrics.captureFps) || 0,
+              encodeFps: Number(metrics.encodeFps) || 0,
+              streamFps: Number(metrics.postFps) || 0,
+              dropped: Number(metrics.dropped) || 0,
+              age: Number(camera?.frameAge) || 0,
+              cpu: Number(metrics.cpu) || 0,
+              ffmpegCpu: Number(metrics.ffmpegCpu) || 0,
+              subscribers: Number(metrics.subscribers) || 0,
+            });
+          }
+        }).catch(() => {});
+      }
+      if (source?.naturalWidth && !sawFrame) {
+        sawFrame = true;
+        setStreamOff(false);
+      }
+      if (!source?.naturalWidth || !faceNode) {
+        timer = window.setTimeout(tick, 80);
+        return;
+      }
+      const token = frameToken(source, probe);
+      if (token === lastToken) {
+        timer = window.setTimeout(tick, 50);
+        return;
+      }
+      lastToken = token;
       busy = true;
       try {
-        const now = Date.now();
-        if (!aiRef.current || now - settingsStamp > 4000) {
-          settingsStamp = now;
-          fetch("/api/gate/status", { cache: "no-store" }).then(async (status) => {
-            const payload = status.ok ? await status.json() : null;
-            if (payload?.ai) aiRef.current = payload.ai;
-            if (layersRef.current.stats && payload) {
-              const camera = payload.cameras?.find((item) => item.id === cameraId);
-              const metrics = payload.metrics || {};
-              setStats({
-                captureFps: Number(metrics.captureFps) || 0,
-                encodeFps: Number(metrics.encodeFps) || 0,
-                streamFps: Number(metrics.postFps) || 0,
-                dropped: Number(metrics.dropped) || 0,
-                age: Number(camera?.frameAge) || 0,
-                cpu: Number(metrics.cpu) || 0,
-                ffmpegCpu: Number(metrics.ffmpegCpu) || 0,
-                subscribers: Number(metrics.subscribers) || 0,
-              });
-            }
-          }).catch(() => {});
-        }
-        const source = image.current;
-        if (source?.naturalWidth && !sawFrame) {
-          sawFrame = true;
-          setStreamOff(false);
-        }
-        if (!source?.naturalWidth || !faceNode) return;
+        if (!landmarker) landmarker = await createLandmarker();
+        const wall = performance.now();
+        if (stop || !drawAnalysisFrame(source, faceNode, 640)) throw new Error("frame");
+        const started = performance.now();
+        const detected = detectFaces(landmarker, faceNode);
+        const detectMs = Math.round(performance.now() - started);
+        const found = assessAll(detected, faceNode, true).filter((face) => face.box).slice(0, FACE_LIMIT);
+        tracks = assignTracks(tracks, found.map((face) => ({
+          box: unmirrorBox(face.box),
+          points: face.aligned,
+          facePx: face.facePx,
+          confidence: face.confidence,
+        })), now);
+        show({ faces: labeled() });
+        const due = tracks.filter((track) => track.live && track.points && now - (track.sentAt || 0) >= 700);
         const result = {
           cameraId,
           width: source.naturalWidth,
           height: source.naturalHeight,
-          capturedAt: Date.now(),
+          capturedAt: now,
           faces: [],
-          models: { face: "off" },
-          timing: {},
+          models: { face: "ready" },
+          timing: { faceMs: detectMs, totalMs: Math.round(performance.now() - wall) },
         };
-        let localFaces = [];
-        try {
-          if (!landmarker) landmarker = await createLandmarker();
-          const wall = performance.now();
-          if (stop || !drawAnalysisFrame(source, faceNode, 640)) throw new Error("frame");
-          const started = performance.now();
-          const detected = detectFaces(landmarker, faceNode, Math.round(started));
-          result.timing.faceMs = Math.round(performance.now() - started);
-          const faces = assessAll(detected, faceNode, true).filter((face) => face.box);
-          const alignStarted = performance.now();
-          localFaces = faces.map((face) => ({ ...face, box: unmirrorBox(face.box) }));
-          const alignMs = Math.round(performance.now() - alignStarted);
-          result.timing.totalMs = Math.round(performance.now() - wall);
-          if (localFaces.length) {
-            misses = 0;
-            show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
-          } else if (++misses >= 3) show({ faces: [] }, true);
-          for (const face of faces.filter((item) => item.aligned && item.box).slice(0, 2)) {
-            // Ноль означает, что модель не заполнила presence. Это не низкая уверенность детектора.
-            const weak = Number.isFinite(face.confidence) && face.confidence > 0 && face.confidence < 0.3;
-            result.faces.push({
-              box: unmirrorBox(face.box),
-              facePx: face.facePx,
-              aligned: !weak,
-              confidence: face.confidence,
-              reason: weak ? "LOW_DETECTION_CONFIDENCE" : "",
-              detectMs: result.timing.faceMs,
-              alignMs,
-              warp: weak ? "" : await jpeg64(warpFace(faceNode, face.aligned)),
-            });
-          }
-          result.models.face = "ready";
-        } catch (error) {
-          // Ошибка лица не останавливает поток: картинка идёт своим эффектом.
-          result.models.face = "failed";
-          result.models.faceError = String(error?.message || "face");
+        for (const track of due) {
+          const weak = Number.isFinite(track.confidence) && track.confidence > 0 && track.confidence < 0.3;
+          track.sentAt = now;
+          result.faces.push({
+            trackId: track.id,
+            box: track.box,
+            facePx: track.facePx,
+            aligned: !weak,
+            confidence: track.confidence,
+            reason: weak ? "LOW_DETECTION_CONFIDENCE" : "",
+            detectMs,
+            alignMs: 0,
+            warp: weak ? "" : await jpeg64(warpFace(faceNode, track.points)),
+          });
         }
-        if (result.timing.faceMs > 80) slow += 1;
+        if (detectMs > 80) slow += 1;
         else slow = Math.max(0, slow - 1);
         const nextOverload = slow >= 3;
         if (nextOverload !== overloadOn) {
           overloadOn = nextOverload;
           setOverload(nextOverload);
         }
+        if (!result.faces.length) return;
         const posted = await fetch("/api/gate/vision", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ cameraId, tabId, result }),
         });
-        if (posted.ok) {
-          const body = await posted.json();
-          let painted = { rendered: false, name: "" };
-          if (body.leader === false) {
-            const follow = await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" });
-            const followed = follow.ok ? (await follow.json()).vision : null;
-            if (followed?.faces?.some((face) => face.name)) painted = show(followed);
-            else if (localFaces.length) painted = show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
-          } else if (body.vision) {
-            const named = body.vision.faces?.some((face) => face.box || face.name);
-            if (named || !localFaces.length) painted = show({ ...body.vision, alert: body.alert || body.vision.alert });
-            else painted = show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
-          }
-          if (body.card?.id) window.dispatchEvent(new CustomEvent("smz-passage", { detail: body.card }));
-          if (body.traces) {
-            window.dispatchEvent(new CustomEvent("smz-trace", {
-              detail: {
-                traces: body.traces,
-                ui: {
-                  camera: true,
-                  frame: Boolean(source?.naturalWidth),
-                  received: true,
-                  rendered: Boolean(painted?.name && painted?.rendered),
-                  card: Boolean(body.card?.id),
-                },
-              },
-            }));
-          }
-          hear(body.alert || body.vision?.alert);
+        if (!posted.ok) return;
+        const body = await posted.json();
+        const serverFaces = body.leader === false
+          ? (await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" }).then((response) => response.ok ? response.json() : null))?.vision?.faces || []
+          : body.vision?.faces || [];
+        for (const face of serverFaces) {
+          const track = tracks.find((item) => item.id === face.trackId) || tracks.find((item) => overlapRatio(item.box, face.box) > 0.45);
+          if (!track) continue;
+          track.identity = { name: face.name || "", outcome: face.outcome || "unknown", score: face.score ?? null };
         }
+        const painted = show({ faces: labeled(), alert: body.alert || body.vision?.alert });
+        for (const card of body.cards || (body.card ? [body.card] : [])) {
+          if (card?.id) window.dispatchEvent(new CustomEvent("smz-passage", { detail: card }));
+        }
+        if (body.traces) {
+          window.dispatchEvent(new CustomEvent("smz-trace", {
+            detail: {
+              traces: body.traces,
+              ui: {
+                camera: true,
+                frame: true,
+                received: true,
+                rendered: Boolean(painted.rendered),
+                card: Boolean(body.card?.id || body.cards?.length),
+                detected: found.length,
+              },
+            },
+          }));
+        }
+        hear(body.alert || body.vision?.alert);
       } catch {
         /* сеть или разбор ответа не должны гасить видео */
       } finally {
@@ -347,6 +386,7 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
         {chip ? <p className="stage-chip">{chip}</p> : null}
         {streamOff ? <div className="stage-note"><strong>{dict.gate.streamOff}</strong></div> : null}
       </div>
+      {unknownCount > 0 ? <p className="passage-wait">{dict.monitoring.unknownNow}{unknownCount > 1 ? ` · ${unknownCount}` : ""}</p> : null}
       {overload ? (
         <div className="form-actions">
           <p className="muted">{dict.monitoring.overload}</p>
