@@ -47,7 +47,8 @@ function detectionConfidence(landmarks) {
   return count ? Math.round((sum / count) * 1000) / 1000 : null;
 }
 
-// Регистрация снимает отражённый кадр. Проходная обязана готовить лицо так же, иначе шаблон не совпадёт.
+// Пиксели canvas отражаются здесь. CSS scaleX(-1) буфер модели не меняет.
+// На живых кадрах FaceTime это отражение дало сходство выше, чем исходный кадр, при тех же 9 шаблонах.
 export function drawAnalysisFrame(source, canvas, edge = 640) {
   const width = source.naturalWidth || source.videoWidth || source.width || 0;
   const height = source.naturalHeight || source.videoHeight || source.height || 0;

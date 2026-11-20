@@ -610,6 +610,8 @@ const enrollment = fs.readFileSync(path.join(process.cwd(), "components/face-cap
 const localPreview = fs.readFileSync(path.join(process.cwd(), "components/camera-preview.js"), "utf8");
 assert(analysisFrame.includes("ctx.scale(-1, 1)") && analysisFrame.includes("export function drawAnalysisFrame"), "Enrollment and the gate no longer share one mirrored preparation");
 assert(gateStage.includes("drawAnalysisFrame") && gateStage.includes("unmirrorBox") && enrollment.includes("drawAnalysisFrame") && localPreview.includes("drawAnalysisFrame"), "A camera path prepares the face differently from enrollment");
+assert(gateStage.includes("face.confidence > 0 && face.confidence < 0.3"), "A missing detector score discarded the aligned face before SFace");
+assert(gateStage.includes('face.outcome === "preliminary"'), "The first match name was removed from the live picture");
 assert(matchReason({ embedded: false }) === "EMBEDDING_FAILED", "A failed embedding was compared");
 assert(matchReason({ templateCount: 0, decryptFailed: 2 }) === "TEMPLATE_DECRYPTION_FAILED", "A broken template was treated as an empty gallery");
 assert(matchReason({ templateCount: 0 }) === "NO_TEMPLATES", "An empty gallery was accepted");

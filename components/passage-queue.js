@@ -58,6 +58,7 @@ export function PassageQueue({ dict, canConfirm = false }) {
           <p className="passage-kicker">{dict.monitoring.detected}</p>
           <h3>{event.name || "—"}</h3>
           {event.department ? <p>{event.department}</p> : null}
+          {event.position ? <p>{event.position}</p> : null}
           <p className="muted">
             {event.cameraCode || "—"}
             {" · "}

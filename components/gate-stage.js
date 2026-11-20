@@ -167,24 +167,31 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
       primeAudio({ open: true });
     };
     const show = (vision, local = false) => {
-      const previous = (visionRef.current?.faces || []).filter((face) => face.outcome === "matched" && face.name && face.box);
+      const previous = (visionRef.current?.faces || []).filter((face) => (face.outcome === "matched" || face.outcome === "preliminary") && face.name && face.box);
+      const incoming = vision?.faces || [];
       const faces = local
-        ? (vision?.faces || []).map((face) => {
-          const known = previous.find((item) => overlaps(item.box, face.box));
-          return known ? { ...face, name: known.name, outcome: "matched" } : { ...face, name: "", outcome: "unchecked" };
+        ? incoming.map((face) => {
+          const known = previous.find((item) => overlaps(item.box, face.box)) || (previous.length === 1 && incoming.length === 1 ? previous[0] : null);
+          return known ? { ...face, name: known.name, outcome: known.outcome, score: known.score } : { ...face, name: "", outcome: "unchecked" };
         })
-        : vision?.faces || [];
+        : incoming;
       const next = { ...vision, faces };
       visionRef.current = next;
       const frame = image.current;
-      if (overlay.current && frame?.naturalWidth) drawOverlay(overlay.current, frame.naturalWidth, frame.naturalHeight, next, layersRef.current, dictRef.current);
-      if (local) return;
+      const rendered = Boolean(overlay.current && frame?.naturalWidth);
+      if (rendered) drawOverlay(overlay.current, frame.naturalWidth, frame.naturalHeight, next, layersRef.current, dictRef.current);
       const nextName = faces.find((face) => (face.outcome === "matched" || face.outcome === "preliminary") && face.name)?.name || "";
-      if (nextName !== shownName) {
-        shownName = nextName;
-        setChip(nextName);
+      if (nextName) {
+        if (nextName !== shownName) {
+          shownName = nextName;
+          setChip(nextName);
+        }
+      } else if (!local || !incoming.length) {
+        shownName = "";
+        setChip("");
       }
-      hear(vision?.alert);
+      if (!local) hear(vision?.alert);
+      return { rendered, name: nextName };
     };
     async function tick() {
       if (stop) return;
@@ -249,7 +256,8 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
             show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
           } else if (++misses >= 3) show({ faces: [] }, true);
           for (const face of faces.filter((item) => item.aligned && item.box).slice(0, 2)) {
-            const weak = Number.isFinite(face.confidence) && face.confidence < 0.35;
+            // Ноль означает, что модель не заполнила presence. Это не низкая уверенность детектора.
+            const weak = Number.isFinite(face.confidence) && face.confidence > 0 && face.confidence < 0.3;
             result.faces.push({
               box: unmirrorBox(face.box),
               facePx: face.facePx,
@@ -281,18 +289,32 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
         });
         if (posted.ok) {
           const body = await posted.json();
+          let painted = { rendered: false, name: "" };
           if (body.leader === false) {
             const follow = await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" });
             const followed = follow.ok ? (await follow.json()).vision : null;
-            if (followed?.faces?.some((face) => face.name)) show(followed);
-            else if (localFaces.length) show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
+            if (followed?.faces?.some((face) => face.name)) painted = show(followed);
+            else if (localFaces.length) painted = show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
           } else if (body.vision) {
-            const named = body.vision.faces?.some((face) => face.box);
-            if (named || !localFaces.length) show({ ...body.vision, alert: body.alert || body.vision.alert });
-            else show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
+            const named = body.vision.faces?.some((face) => face.box || face.name);
+            if (named || !localFaces.length) painted = show({ ...body.vision, alert: body.alert || body.vision.alert });
+            else painted = show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
           }
           if (body.card?.id) window.dispatchEvent(new CustomEvent("smz-passage", { detail: body.card }));
-          if (body.traces) window.dispatchEvent(new CustomEvent("smz-trace", { detail: body.traces }));
+          if (body.traces) {
+            window.dispatchEvent(new CustomEvent("smz-trace", {
+              detail: {
+                traces: body.traces,
+                ui: {
+                  camera: true,
+                  frame: Boolean(source?.naturalWidth),
+                  received: true,
+                  rendered: Boolean(painted?.name && painted?.rendered),
+                  card: Boolean(body.card?.id),
+                },
+              },
+            }));
+          }
           hear(body.alert || body.vision?.alert);
         }
       } catch {

@@ -97,14 +97,15 @@ export async function POST(request) {
       for (const trace of traces) {
         if (trace.reason === "MATCH_CONFIRMED") trace.stable = true;
       }
-      const department = get(
-        "SELECT d.name AS name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?",
+      const employee = get(
+        "SELECT e.position AS position, d.name AS department FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?",
         [passage.employeeId],
-      )?.name || "";
+      );
       card = {
         id: passage.id,
         name: passage.name || proposal.name || "",
-        department,
+        department: employee?.department || "",
+        position: employee?.position || "",
         cameraCode: passage.cameraCode || "",
         direction: passage.direction || (camera.direction === "exit" ? "out" : "in"),
         outcome: passage.outcome || proposal.outcome,
@@ -112,6 +113,7 @@ export async function POST(request) {
       };
     }
   }
+  for (const trace of traces) trace.published = Boolean(card) && trace.reason === "MATCH_CONFIRMED";
   const vision = noteVision(cameraId, { ...incoming, faces, alert });
   return Response.json({ ok: true, leader: true, vision, alert, card, traces }, { headers: { "cache-control": "no-store" } });
 }
