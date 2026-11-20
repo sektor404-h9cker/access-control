@@ -18,7 +18,10 @@ export function CameraLog({ cameraId, dict }) {
         if (stop || !name || name === previous) return;
         previous = name;
         const stamp = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        setLines((current) => [{ id: `${stamp}-${name}`, stamp, text: name }, ...current].slice(0, 6));
+        setLines((current) => {
+          if (current[0]?.text === name) return current;
+          return [{ id: crypto.randomUUID(), stamp, text: name }, ...current].slice(0, 6);
+        });
       } catch {
         /* журнал не должен останавливать видео */
       }
@@ -34,8 +37,8 @@ export function CameraLog({ cameraId, dict }) {
     <div className="stack">
       {lines.length ? (
         <ul className="camera-log-list">
-          {lines.map((line) => (
-            <li key={line.id}><span>{line.stamp}</span>{line.text}</li>
+          {lines.map((line, index) => (
+            <li key={`${line.id}-${index}`}><span>{line.stamp}</span>{line.text}</li>
           ))}
         </ul>
       ) : <p className="muted">{dict.monitoring.faceMissing}</p>}
