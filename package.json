@@ -2,16 +2,32 @@
   "name": "smz-access-control",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "node scripts/ensure-env.js && next dev --hostname 127.0.0.1 --port 3000",
+    "build": "node scripts/ensure-env.js && next build",
+    "start": "node scripts/ensure-env.js && next start --hostname 127.0.0.1 --port 3000",
+    "lint": "eslint",
+    "check": "node scripts/self-check.js && node scripts/face-recognition-check.js && node scripts/camera-hub-check.js",
+    "check:face": "node scripts/face-recognition-check.js",
+    "backup": "node scripts/backup.js",
+    "gate:token": "node scripts/gate-token.js",
+    "gate:agent": "node scripts/gate-agent.js",
+    "start:lan": "node scripts/ensure-env.js && next start --hostname 0.0.0.0 --port 3000",
+    "lan:https": "node scripts/lan-https.js",
+    "lan:address": "node scripts/lan-address.js",
+    "demo:seed": "node scripts/seed-demo.js",
+    "dev:demo": "node scripts/dev-demo.js"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
+    "jpeg-js": "^0.4.4",
     "next": "16.4.6",
+    "onnxruntime-node": "^1.31.1",
+    "pdfkit": "^0.20.2",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",

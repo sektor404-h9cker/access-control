@@ -1,0 +1,6 @@
+{
+  "server": "http://127.0.0.1:3000",
+  "cameras": [
+    { "id": "camera-entrance", "device": "0", "width": 1280, "height": 720, "fps": 15 }
+  ]
+}

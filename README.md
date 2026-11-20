@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# SMZ Access Control
 
-## Getting Started
+Внутренняя система учёта рабочего времени Suraxanı Maşınqayırma Zavodu. Первый этап: локальный фундамент, база и интерфейс. Это ещё не промышленная эксплуатация.
 
-First, run the development server:
+## Запуск
+
+Нужен Node.js 22 или новее. Команды выполняются в папке проекта:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Приложение открывается только на этом компьютере: [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+При первом запуске создаётся `.env.local` с секретом сессии и пустая база `data/smz.db`. На экране настройки задаётся учётная запись администратора. Готового пароля нет.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Остановка: `Ctrl+C` в терминале.
 
-## Learn More
+## Рабочий компьютер на Windows
 
-To learn more about Next.js, take a look at the following resources:
+Подойдёт 64-битная Windows 10 или Windows 11. На Windows 7 эта версия Node.js не ставится. На самом компьютере с камерой нужны Node.js 22, Git и ffmpeg в `PATH`. Автозапуск и звук динамика на Windows здесь не проверялись.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bat
+git clone https://github.com/sektor404-h9cker/access-control.git
+cd access-control
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Страница открывается на этом компьютере: `http://127.0.0.1:3000`. Первый запуск создаёт пустую базу и просит завести администратора. Сотрудники, лица и пароли с другого компьютера в Git не входят.
 
-## Deploy on Vercel
+Камера:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bat
+ffmpeg -list_devices true -f dshow -i dummy
+copy data\gate-agent.example.json data\gate-agent.json
+npm run gate:token
+npm run gate:agent
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+В `data\gate-agent.json` поле `device` — имя камеры из списка DirectShow, например `USB2.0 HD UVC WebCam`. Индекс `0` относится к macOS. Автозапуск после входа в Windows, не как служба:
+
+```bat
+powershell -ExecutionPolicy Bypass -File scripts\windows\install-gate-task.ps1
+```
+
+## Демонстрационные данные
+
+Тестовые записи пишутся только в `data/demo.db` и не попадают в рабочую базу.
+
+```bash
+npm run demo:seed
+npm run dev:demo
+```
+
+Пароль демо-администратора скрипт показывает один раз в терминале.
+
+## Резервная копия
+
+```bash
+npm run backup
+```
+
+Копия базы и фотографий появляется в `data/backups`. Восстановление пока выполняется вручную: остановить приложение и заменить `data/smz.db` и `data/photos` содержимым копии.
+
+## Проверка
+
+```bash
+npm run check
+```
