@@ -7,7 +7,7 @@ import { CameraDiag, cameraStatusText, useCamera } from "./use-camera";
 import { assignTracks, dueTracks, frameFresh, noteAgreement, readySample, summarizeLatency } from "@/lib/face-track";
 import { forgetSubject } from "./audio-session";
 import { listSharedDevices } from "./camera-hub";
-import { HINT, assessAll, createLandmarker, detectFaces, viewBox, warpFace } from "./face-vision";
+import { HINT, assessAll, createLandmarker, detectFaces, drawAnalysisFrame, viewBox, warpFace } from "./face-vision";
 
 const detectors = new Set();
 const DETECT_EDGE = 1280;
@@ -125,7 +125,6 @@ export function CameraPreview({ dict, camera, canWrite, mode = "review", templat
     let frame = 0;
     let landmarker;
     let stamp = 0;
-    let context = null;
     const video = videoRef.current;
     const canvas = detectRef.current;
 
@@ -139,19 +138,9 @@ export function CameraPreview({ dict, camera, canWrite, mode = "review", templat
         }
         setPhase("ready");
         function fullFrame() {
-          if (!video || video.videoWidth === canvas.width) return canvas;
           const full = fullRef.current;
-          if (!full) return canvas;
-          if (full.width !== video.videoWidth || full.height !== video.videoHeight) {
-            full.width = video.videoWidth;
-            full.height = video.videoHeight;
-          }
-          const ctx = full.getContext("2d", { willReadFrequently: true });
-          ctx.save();
-          ctx.translate(full.width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, 0, 0);
-          ctx.restore();
+          if (!video?.videoWidth || !full) return canvas;
+          drawAnalysisFrame(video, full, Math.max(video.videoWidth, video.videoHeight));
           return full;
         }
         const loop = () => {
@@ -161,20 +150,7 @@ export function CameraPreview({ dict, camera, canWrite, mode = "review", templat
           const now = performance.now();
           if (now - stamp < 220) return;
           stamp = now;
-          const scale = Math.min(1, DETECT_EDGE / Math.max(video.videoWidth, video.videoHeight));
-          const width = Math.max(2, Math.round(video.videoWidth * scale));
-          const height = Math.max(2, Math.round(video.videoHeight * scale));
-          if (canvas.width !== width || canvas.height !== height) {
-            canvas.width = width;
-            canvas.height = height;
-            context = canvas.getContext("2d", { willReadFrequently: true });
-          }
-          if (!context) context = canvas.getContext("2d", { willReadFrequently: true });
-          context.save();
-          context.translate(canvas.width, 0);
-          context.scale(-1, 1);
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          context.restore();
+          if (!drawAnalysisFrame(video, canvas, DETECT_EDGE)) return;
           const detectStarted = performance.now();
           let readings;
           try {

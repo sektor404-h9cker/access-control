@@ -11,6 +11,7 @@ import { audioState, enqueueAlert, primeAudio, setAudioMuted, stopAudio } from "
 import { cameraErrorCode } from "./camera-devices";
 import { listSharedDevices } from "./camera-hub";
 import { CameraPreview } from "./camera-preview";
+import { RecognitionTrace } from "./recognition-trace";
 import { GateStage } from "./gate-stage";
 import { CameraLog } from "./camera-log";
 import { PassageQueue } from "./passage-queue";
@@ -257,6 +258,7 @@ export function MonitorDeck({ dict, cameras, canControl, canConfirm = false, own
             </div>
           </div>
         ) : null}
+        {owner ? <RecognitionTrace dict={dict} /> : null}
         {showDiag ? (
           <div className="panel-bd">
             <h2>{dict.monitoring.diagTitle}</h2>

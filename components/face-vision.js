@@ -34,6 +34,45 @@ export const HINT = {
   done: "hintDone",
 };
 
+function detectionConfidence(landmarks) {
+  const indexes = [1, 33, 263, 61, 291];
+  let sum = 0;
+  let count = 0;
+  for (const index of indexes) {
+    const value = Number(landmarks?.[index]?.presence ?? landmarks?.[index]?.visibility);
+    if (!Number.isFinite(value)) continue;
+    sum += value;
+    count += 1;
+  }
+  return count ? Math.round((sum / count) * 1000) / 1000 : null;
+}
+
+// Регистрация снимает отражённый кадр. Проходная обязана готовить лицо так же, иначе шаблон не совпадёт.
+export function drawAnalysisFrame(source, canvas, edge = 640) {
+  const width = source.naturalWidth || source.videoWidth || source.width || 0;
+  const height = source.naturalHeight || source.videoHeight || source.height || 0;
+  if (!width || !height) return false;
+  const scale = Math.min(1, edge / Math.max(width, height));
+  const nextW = Math.max(2, Math.round(width * scale));
+  const nextH = Math.max(2, Math.round(height * scale));
+  if (canvas.width !== nextW) canvas.width = nextW;
+  if (canvas.height !== nextH) canvas.height = nextH;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, nextW, nextH);
+  ctx.save();
+  ctx.translate(nextW, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(source, 0, 0, nextW, nextH);
+  ctx.restore();
+  return { width: nextW, height: nextH };
+}
+
+export function unmirrorBox(box) {
+  if (!box) return null;
+  return { ...box, x: Math.min(1, Math.max(0, 1 - box.x - box.w)) };
+}
+
 function bounds(landmarks) {
   let minX = 1;
   let minY = 1;
@@ -93,7 +132,7 @@ function scoreFace(landmarks, canvas, passage = false) {
   const yaw = measure?.yaw ?? yawOf(landmarks);
   const facePx = Math.round(Math.min(box.w * canvas.width, box.h * canvas.height));
   const centered = Math.abs(box.x + box.w / 2 - 0.5) <= 0.18 && Math.abs(box.y + box.h / 2 - 0.48) <= 0.24;
-  const base = { box, yaw, pitch: measure?.pitch ?? 0, points, aligned, facePx, sharpness: 0 };
+  const base = { box, yaw, pitch: measure?.pitch ?? 0, points, aligned, facePx, sharpness: 0, confidence: detectionConfidence(landmarks) };
   if ((passage && facePx < 72) || (!passage && area < 0.045)) {
     return { code: "far", quality: "poor", ...base };
   }
@@ -285,11 +324,11 @@ export async function createLandmarker() {
     return await vision.FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: "/vendor/mediapipe/face_landmarker.task", delegate: "CPU" },
       runningMode: "VIDEO",
-      numFaces: 2,
+      numFaces: 3,
       outputFaceBlendshapes: false,
-      minFaceDetectionConfidence: 0.4,
-      minFacePresenceConfidence: 0.4,
-      minTrackingConfidence: 0.4,
+      minFaceDetectionConfidence: 0.3,
+      minFacePresenceConfidence: 0.3,
+      minTrackingConfidence: 0.3,
     });
   } finally {
     console.error = error;

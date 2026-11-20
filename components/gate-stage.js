@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { submitPerformanceProfile } from "@/app/actions/vision";
 import { primeAudio } from "./audio-session";
-import { assessAll, createLandmarker, detectFaces, warpFace } from "./face-vision";
+import { assessAll, createLandmarker, detectFaces, drawAnalysisFrame, unmirrorBox, warpFace } from "./face-vision";
 
 const LAYERS_KEY = "smz-ai-layers";
 
 function readLayers() {
   try {
     const saved = JSON.parse(localStorage.getItem(LAYERS_KEY) || "");
-    return { faces: saved.faces !== false, stats: saved.stats === true };
+    return { faces: true, stats: saved.stats === true };
   } catch {
     return { faces: true, stats: false };
   }
@@ -23,19 +23,6 @@ function overlaps(left, right) {
   const shared = width * height;
   const smaller = Math.min(left.w * left.h, right.w * right.h);
   return smaller > 0 && shared / smaller > 0.45;
-}
-
-function paintTo(source, canvas, edge) {
-  const width = source.naturalWidth || source.videoWidth || source.width || 0;
-  const height = source.naturalHeight || source.videoHeight || source.height || 0;
-  if (!width || !height) return false;
-  const scale = Math.min(1, edge / Math.max(width, height));
-  const nextW = Math.max(2, Math.round(width * scale));
-  const nextH = Math.max(2, Math.round(height * scale));
-  if (canvas.width !== nextW) canvas.width = nextW;
-  if (canvas.height !== nextH) canvas.height = nextH;
-  canvas.getContext("2d").drawImage(source, 0, 0, nextW, nextH);
-  return true;
 }
 
 function project(box, viewW, viewH, frameW, frameH) {
@@ -54,7 +41,7 @@ function project(box, viewW, viewH, frameW, frameH) {
 
 function faceCaption(face, dict) {
   if (!dict) return face.outcome === "matched" ? face.name : "";
-  if (face.outcome === "matched") return face.name;
+  if (face.outcome === "matched" || face.outcome === "preliminary") return face.name;
   if (face.enrolled === false) return dict.gate.noTemplate;
   if (face.outcome === "unknown") return dict.gate.unknown;
   if (face.outcome === "ambiguous") return dict.gate.unknown;
@@ -101,11 +88,6 @@ async function jpeg64(canvas) {
     binary += String.fromCharCode(...bytes.subarray(index, index + step));
   }
   return btoa(binary);
-}
-
-// Один кадр браузеру до детектора. scheduler.yield здесь ждал слишком долго и раздувал замер.
-function letPaint() {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 export function GateStage({ cameraId, code = "", dict, owner = false }) {
@@ -172,8 +154,8 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
     let busy = false;
     let slow = 0;
     let overloadOn = false;
-    let faceClock = 0;
     let shownName = "";
+    let misses = 0;
     let lastAlert = "";
     let settingsStamp = 0;
     let sawFrame = false;
@@ -197,7 +179,7 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
       const frame = image.current;
       if (overlay.current && frame?.naturalWidth) drawOverlay(overlay.current, frame.naturalWidth, frame.naturalHeight, next, layersRef.current, dictRef.current);
       if (local) return;
-      const nextName = faces.find((face) => face.outcome === "matched" && face.name)?.name || "";
+      const nextName = faces.find((face) => (face.outcome === "matched" || face.outcome === "preliminary") && face.name)?.name || "";
       if (nextName !== shownName) {
         shownName = nextName;
         setChip(nextName);
@@ -212,47 +194,34 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
       }
       busy = true;
       try {
-        const claim = await fetch("/api/gate/vision", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ cameraId, tabId }),
-        });
-        const claimed = claim.ok ? await claim.json() : { leader: false };
-        if (!claimed.leader) {
-          const follow = await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" });
-          if (follow.ok) show((await follow.json()).vision);
-          landmarker?.close();
-          landmarker = null;
-          return;
-        }
         const now = Date.now();
         if (!aiRef.current || now - settingsStamp > 4000) {
-          const status = await fetch("/api/gate/status", { cache: "no-store" });
-          const payload = status.ok ? await status.json() : null;
-          settingsStamp = Date.now();
-          if (payload?.ai) aiRef.current = payload.ai;
-          if (layersRef.current.stats && payload) {
-            const camera = payload.cameras?.find((item) => item.id === cameraId);
-            const metrics = payload.metrics || {};
-            setStats({
-              captureFps: Number(metrics.captureFps) || 0,
-              encodeFps: Number(metrics.encodeFps) || 0,
-              streamFps: Number(metrics.postFps) || 0,
-              dropped: Number(metrics.dropped) || 0,
-              age: Number(camera?.frameAge) || 0,
-              cpu: Number(metrics.cpu) || 0,
-              ffmpegCpu: Number(metrics.ffmpegCpu) || 0,
-              subscribers: Number(metrics.subscribers) || 0,
-            });
-          }
+          settingsStamp = now;
+          fetch("/api/gate/status", { cache: "no-store" }).then(async (status) => {
+            const payload = status.ok ? await status.json() : null;
+            if (payload?.ai) aiRef.current = payload.ai;
+            if (layersRef.current.stats && payload) {
+              const camera = payload.cameras?.find((item) => item.id === cameraId);
+              const metrics = payload.metrics || {};
+              setStats({
+                captureFps: Number(metrics.captureFps) || 0,
+                encodeFps: Number(metrics.encodeFps) || 0,
+                streamFps: Number(metrics.postFps) || 0,
+                dropped: Number(metrics.dropped) || 0,
+                age: Number(camera?.frameAge) || 0,
+                cpu: Number(metrics.cpu) || 0,
+                ffmpegCpu: Number(metrics.ffmpegCpu) || 0,
+                subscribers: Number(metrics.subscribers) || 0,
+              });
+            }
+          }).catch(() => {});
         }
-        const ai = aiRef.current || { face: true, faceEdge: 640, analysisFps: 2 };
         const source = image.current;
         if (source?.naturalWidth && !sawFrame) {
           sawFrame = true;
           setStreamOff(false);
         }
-        if (!ai?.face || !source?.naturalWidth || !faceNode) return;
+        if (!source?.naturalWidth || !faceNode) return;
         const result = {
           cameraId,
           width: source.naturalWidth,
@@ -262,23 +231,35 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
           models: { face: "off" },
           timing: {},
         };
+        let localFaces = [];
         try {
           if (!landmarker) landmarker = await createLandmarker();
           const wall = performance.now();
-          await letPaint();
-          if (stop || !paintTo(source, faceNode, ai.faceEdge || 640)) throw new Error("frame");
+          if (stop || !drawAnalysisFrame(source, faceNode, 640)) throw new Error("frame");
           const started = performance.now();
-          faceClock += 16;
-          const detected = detectFaces(landmarker, faceNode, faceClock);
+          const detected = detectFaces(landmarker, faceNode, Math.round(started));
           result.timing.faceMs = Math.round(performance.now() - started);
-          result.timing.totalMs = Math.round(performance.now() - wall);
           const faces = assessAll(detected, faceNode, true).filter((face) => face.box);
-          if (faces.length) show({ faces: faces.map((face) => ({ box: face.box })) }, true);
-          const usable = faces.filter((face) => face.aligned && face.facePx >= 48);
-          for (const face of faces.slice(0, 2)) {
-            let warp = "";
-            if (usable.includes(face)) warp = await jpeg64(warpFace(faceNode, face.aligned));
-            result.faces.push({ box: face.box, warp });
+          const alignStarted = performance.now();
+          localFaces = faces.map((face) => ({ ...face, box: unmirrorBox(face.box) }));
+          const alignMs = Math.round(performance.now() - alignStarted);
+          result.timing.totalMs = Math.round(performance.now() - wall);
+          if (localFaces.length) {
+            misses = 0;
+            show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
+          } else if (++misses >= 3) show({ faces: [] }, true);
+          for (const face of faces.filter((item) => item.aligned && item.box).slice(0, 2)) {
+            const weak = Number.isFinite(face.confidence) && face.confidence < 0.35;
+            result.faces.push({
+              box: unmirrorBox(face.box),
+              facePx: face.facePx,
+              aligned: !weak,
+              confidence: face.confidence,
+              reason: weak ? "LOW_DETECTION_CONFIDENCE" : "",
+              detectMs: result.timing.faceMs,
+              alignMs,
+              warp: weak ? "" : await jpeg64(warpFace(faceNode, face.aligned)),
+            });
           }
           result.models.face = "ready";
         } catch (error) {
@@ -300,15 +281,25 @@ export function GateStage({ cameraId, code = "", dict, owner = false }) {
         });
         if (posted.ok) {
           const body = await posted.json();
-          if (body.vision) show({ ...body.vision, alert: body.alert || body.vision.alert });
+          if (body.leader === false) {
+            const follow = await fetch(`/api/gate/vision/${cameraId}`, { cache: "no-store" });
+            const followed = follow.ok ? (await follow.json()).vision : null;
+            if (followed?.faces?.some((face) => face.name)) show(followed);
+            else if (localFaces.length) show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
+          } else if (body.vision) {
+            const named = body.vision.faces?.some((face) => face.box);
+            if (named || !localFaces.length) show({ ...body.vision, alert: body.alert || body.vision.alert });
+            else show({ faces: localFaces.map((face) => ({ box: face.box })) }, true);
+          }
           if (body.card?.id) window.dispatchEvent(new CustomEvent("smz-passage", { detail: body.card }));
-          hear(body.alert);
+          if (body.traces) window.dispatchEvent(new CustomEvent("smz-trace", { detail: body.traces }));
+          hear(body.alert || body.vision?.alert);
         }
       } catch {
         /* сеть или разбор ответа не должны гасить видео */
       } finally {
         busy = false;
-        if (!stop) timer = window.setTimeout(tick, Math.round(1000 / Math.max(2, aiRef.current?.analysisFps || 3)));
+        if (!stop) timer = window.setTimeout(tick, 40);
       }
     }
     tick();

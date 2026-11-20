@@ -6,7 +6,7 @@ import { listSharedDevices } from "./camera-hub";
 import { holdCamera } from "./camera-hub";
 import { poseMatches } from "@/lib/face-geometry";
 import { pauseGateForEnrollment, resumeGateAfterEnrollment } from "@/app/actions/gate";
-import { ENROLL_STEPS, HINT, assess, createLandmarker, detectFaces, hashDistance, imageHash, qualityLabel, viewBox, warpFace } from "./face-vision";
+import { ENROLL_STEPS, HINT, assess, createLandmarker, detectFaces, drawAnalysisFrame, hashDistance, imageHash, qualityLabel, viewBox, warpFace } from "./face-vision";
 
 export function FaceCapture({ dict, onClose, onConfirm, busy, serverError = "", replace = false, onPreview }) {
   const videoRef = useRef(null);
@@ -131,19 +131,7 @@ export function FaceCapture({ dict, onClose, onConfirm, busy, serverError = "", 
           if (!video.videoWidth || !landmarker) return;
           const now = performance.now();
           if (now - stamp < 180) return;
-          const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
-          const width = Math.max(2, Math.round(video.videoWidth * scale));
-          const height = Math.max(2, Math.round(video.videoHeight * scale));
-          if (canvas.width !== width || canvas.height !== height) {
-            canvas.width = width;
-            canvas.height = height;
-          }
-          const ctx = canvas.getContext("2d", { willReadFrequently: true });
-          ctx.save();
-          ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          ctx.restore();
+          if (!drawAnalysisFrame(video, canvas, 640)) return;
           if (previewRef.current && now - sent > 700) {
             sent = now;
             canvas.toBlob((blob) => { if (blob && previewRef.current) previewRef.current(blob); }, "image/jpeg", 0.55);
